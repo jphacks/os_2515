@@ -1,0 +1,71 @@
+# ================================
+# 🧱 基本除外（あなたの元の内容を含む）
+# ================================
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ / Android Studio
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# VSCode（コメントアウトしたままでOK）
+#.vscode/
+
+# ================================
+# 🐦 Flutter / Dart
+# ================================
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Symbolication / obfuscation
+app.*.symbols
+app.*.map.json
+
+# Android build artifacts
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# ================================
+# 🔥 Firebase / Google関連
+# ================================
+# Firebase設定ファイル（絶対に公開しない）
+google-services.json
+GoogleService-Info.plist
+
+# Firebase Admin SDKキー
+serviceAccountKey.json
+
+.firebaserc
+firebase.json
+# ================================
+# 🔐 環境変数ファイル（APIキーなど）
+# ================================
+.env
+.env.*
+*.secrets.json
+
+# ================================
+# 🧩 OS依存・その他
+# ================================
+*.iml
+.DS_Store
+Thumbs.db

@@ -38,6 +38,17 @@ class TodoRepository {
         .map((s) => s.docs.map((d) => Todo.fromDoc(d)).toList());
   }
 
+  /// 全タスクを購読（active/real/complete をすべて含む）
+  /// 変更があるたびに最新の一覧を流します。
+  Stream<List<Todo>> watchAll() {
+    final uid = _uid;
+    if (uid == null) return const Stream.empty();
+    return _colFor(uid)
+        .orderBy('updatedAt', descending: true)
+        .snapshots()
+        .map((s) => s.docs.map((d) => Todo.fromDoc(d)).toList());
+  }
+
   Future<List<Todo>> fetchActiveOnce() async {
     final uid = _uid;
     if (uid == null) return [];

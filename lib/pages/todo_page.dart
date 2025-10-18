@@ -84,7 +84,7 @@ class _TodoPageState extends State<TodoPage> {
           ],
         ),
         body: StreamBuilder<List<Todo>>(
-          stream: _repo.watchActive(),
+          stream: _repo.watchAll(),
           builder: (context, snap) {
             // 🔸エラーが出ていたら画面に表示（原因が分かる）
             if (snap.hasError) {
@@ -100,88 +100,60 @@ class _TodoPageState extends State<TodoPage> {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
-            // 🔸データを取り出す（null安全）
-            final todos = snap.data ?? const <Todo>[];
-            if (todos.isEmpty) return const _EmptyState();
-            // return ListView(
-            //   padding: const EdgeInsets.only(bottom: 96),
-            //   children: [
-            //     // ===== アクティブ一覧 =====
-            //     ...todos.map(
-            //       (t) => ListTile(
-            //         title: Text(t.title, style: const TextStyle()),
-            //         subtitle: Text(_daysLeftLabel(t)),
-            //         trailing: FilledButton.icon(
-            //           onPressed: () async {
-            //             // ← ここはあなたの “達成” ダイアログ＆complete() 呼び出しの中身をそのまま流用してください
-            //             // 例：
-            //             final ok =
-            //                 await showDialog<bool>(
-            //                   context: context,
-            //                   builder: (c) => AlertDialog(
-            //                     title: const Text('達成しますか？'),
-            //                     content: Text('"${t.title}" を達成済みにします'),
-            //                     actions: [
-            //                       TextButton(
-            //                         onPressed: () => Navigator.pop(c, false),
-            //                         child: const Text('キャンセル'),
-            //                       ),
-            //                       FilledButton(
-            //                         onPressed: () => Navigator.pop(c, true),
-            //                         child: const Text('達成する'),
-            //                       ),
-            //                     ],
-            //                   ),
-            //                 ) ??
-            //                 false;
-            //             if (!ok) return;
+            // 🔸データを取り出す（全件：active / switchedToReal / completed）
+            final all = snap.data ?? const <Todo>[];
 
-            //             await _repo.complete(t);
-            //             if (!context.mounted) return;
+            // ✅ タスクが0件でもカレンダーは常に表示する
+            //    → 下段リストだけ空表示にする
+            final showEmptyList = all.isEmpty;
 
-            //             final now = DateTime.now();
-            //             final due = t.realDue ?? t.displayedDue ?? now;
-            //             final lead = Todo.earlyDaysOnComplete(
-            //               realDue: due,
-            //               completedAt: now,
-            //             );
+            // 🔸 カレンダー（日別集計）は“全件”で作る（達成もライトグリーンで残す）
 
-            //             await showDialog<void>(
-            //               context: context,
-            //               builder: (c) => AlertDialog(
-            //                 title: const Text('🎉 Congratulation!'),
-            //                 content: Text(
-            //                   '「${t.title}」を達成！\n$lead 日の余裕をつくれました',
-            //                 ),
-            //                 actions: [
-            //                   FilledButton(
-            //                     onPressed: () => Navigator.pop(c),
-            //                     child: const Text('OK'),
-            //                   ),
-            //                 ],
-            //               ),
-            //             );
-            //           },
-            //           icon: const Icon(Icons.rocket_launch),
-            //           label: const Text('達成'),
-            //         ),
-            //         onTap: () => _edit(t),
-            //       ),
-            //     ),
-
-            //     const SizedBox(height: 12),
-            //   ],
-            // );
-            // 🔸 データを取り出す（null安全）
-
-            // 🔸 カレンダーで使う日付ごとのタスク一覧を作る
             final Map<DateTime, List<Todo>> byDay = {};
-            for (final t in todos) {
-              final due = t.realDue ?? t.displayedDue;
-              if (due == null) continue;
-              final key = DateTime(due.year, due.month, due.day);
-              (byDay[key] ??= []).add(t);
+            for (final t in all) {
+              DateTime? effective; // ← この“effective”がカレンダーの基準日
+              switch (t.state) {
+                case TodoState.active:
+                  effective = t.displayedDue; // 前倒し中は前倒し期限
+                  break;
+                case TodoState.switchedToReal:
+                  effective = t.realDue; // 実期限へ切替後は実期限
+                  break;
+                case TodoState.completed:
+                  effective =
+                      t.displayedDue ?? t.displayedDue; // 達成済みも期限のマスにライトグリーンで残す
+                  break;
+              }
+              if (effective == null) continue;
+              final key = DateTime(
+                effective.year,
+                effective.month,
+                effective.day,
+              );
+              (byDay[key] ??= <Todo>[]).add(t);
             }
+
+            // 🔸 下段リストは「未完了のみ」を表示（期限が迫っている順）
+            final listTodos =
+                [
+                  for (final t in all)
+                    if (t.state != TodoState.completed) t,
+                ]..sort((a, b) {
+                  DateTime? da = switch (a.state) {
+                    TodoState.active => a.displayedDue,
+                    TodoState.switchedToReal => a.realDue,
+                    _ => null,
+                  };
+                  DateTime? db = switch (b.state) {
+                    TodoState.active => b.displayedDue,
+                    TodoState.switchedToReal => b.realDue,
+                    _ => null,
+                  };
+                  if (da == null && db == null) return 0;
+                  if (da == null) return 1; // 期限なしは後ろ
+                  if (db == null) return -1;
+                  return da.compareTo(db); // 早いほうを先に
+                });
 
             // 🔸 上半分にカレンダー、下半分にリストを表示
             return Column(
@@ -208,18 +180,34 @@ class _TodoPageState extends State<TodoPage> {
                       ),
                     ),
                     calendarBuilders: CalendarBuilders(
+                      // その日のタスクぶん「●」を並べて表示
+                      // active / switchedToReal = 赤, completed = ライトグリーン
                       markerBuilder: (context, day, events) {
-                        if (events.isEmpty) return const SizedBox();
+                        if (events.isEmpty) return const SizedBox.shrink();
+                        final items = events.cast<Todo>();
                         return Align(
                           alignment: Alignment.bottomCenter,
                           child: Padding(
                             padding: const EdgeInsets.only(bottom: 3),
-                            child: Text(
-                              '${events.length}',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: Colors.redAccent,
-                              ),
+                            child: Wrap(
+                              spacing: 2,
+                              runSpacing: 2,
+                              alignment: WrapAlignment.center,
+                              children: [
+                                for (final t in items.take(6)) // 多すぎる日は最大6個まで
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: BoxDecoration(
+                                      color: switch (t.state) {
+                                        TodoState.completed =>
+                                          Colors.lightGreen, // ✅ ライトグリーン
+                                        _ => Colors.redAccent, // それ以外は赤
+                                      },
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
                         );
@@ -230,74 +218,79 @@ class _TodoPageState extends State<TodoPage> {
 
                 const Divider(height: 1),
 
-                // 🗒 下半分：タスクリスト
+                // 🗒 下半分：タスクリスト(未完了のみ)
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.only(bottom: 96),
-                    children: [
-                      ...todos.map(
-                        (t) => ListTile(
-                          title: Text(t.title, style: const TextStyle()),
-                          subtitle: Text(_daysLeftLabel(t)),
-                          trailing: FilledButton.icon(
-                            onPressed: () async {
-                              final ok =
-                                  await showDialog<bool>(
-                                    context: context,
-                                    builder: (c) => AlertDialog(
-                                      title: const Text('達成しますか？'),
-                                      content: Text('"${t.title}" を達成済みにします'),
-                                      actions: [
-                                        TextButton(
-                                          onPressed: () =>
-                                              Navigator.pop(c, false),
-                                          child: const Text('キャンセル'),
-                                        ),
-                                        FilledButton(
-                                          onPressed: () =>
-                                              Navigator.pop(c, true),
-                                          child: const Text('達成する'),
-                                        ),
-                                      ],
-                                    ),
-                                  ) ??
-                                  false;
-                              if (!ok) return;
+                  child: showEmptyList
+                      ? const _EmptyState()
+                      : ListView(
+                          padding: const EdgeInsets.only(bottom: 96),
+                          children: [
+                            ...listTodos.map(
+                              (t) => ListTile(
+                                title: Text(t.title, style: const TextStyle()),
+                                subtitle: Text(_daysLeftLabel(t)),
+                                trailing: FilledButton.icon(
+                                  onPressed: () async {
+                                    final ok =
+                                        await showDialog<bool>(
+                                          context: context,
+                                          builder: (c) => AlertDialog(
+                                            title: const Text('達成しますか？'),
+                                            content: Text(
+                                              '"${t.title}" を達成済みにします',
+                                            ),
+                                            actions: [
+                                              TextButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, false),
+                                                child: const Text('キャンセル'),
+                                              ),
+                                              FilledButton(
+                                                onPressed: () =>
+                                                    Navigator.pop(c, true),
+                                                child: const Text('達成する'),
+                                              ),
+                                            ],
+                                          ),
+                                        ) ??
+                                        false;
+                                    if (!ok) return;
 
-                              await _repo.complete(t);
-                              if (!context.mounted) return;
-                              final now = DateTime.now();
-                              final due = t.realDue ?? t.displayedDue ?? now;
-                              final lead = Todo.earlyDaysOnComplete(
-                                realDue: due,
-                                completedAt: now,
-                              );
+                                    await _repo.complete(t);
+                                    if (!context.mounted) return;
+                                    final now = DateTime.now();
+                                    final due =
+                                        t.realDue ?? t.displayedDue ?? now;
+                                    final lead = Todo.earlyDaysOnComplete(
+                                      realDue: due,
+                                      completedAt: now,
+                                    );
 
-                              await showDialog<void>(
-                                context: context,
-                                builder: (c) => AlertDialog(
-                                  title: const Text('🎉 Congratulation!'),
-                                  content: Text(
-                                    '「${t.title}」を達成！\n$lead 日の余裕をつくれました',
-                                  ),
-                                  actions: [
-                                    FilledButton(
-                                      onPressed: () => Navigator.pop(c),
-                                      child: const Text('OK'),
-                                    ),
-                                  ],
+                                    await showDialog<void>(
+                                      context: context,
+                                      builder: (c) => AlertDialog(
+                                        title: const Text('🎉 Congratulation!'),
+                                        content: Text(
+                                          '「${t.title}」を達成！\n$lead 日の余裕をつくれました',
+                                        ),
+                                        actions: [
+                                          FilledButton(
+                                            onPressed: () => Navigator.pop(c),
+                                            child: const Text('OK'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                  },
+                                  icon: const Icon(Icons.rocket_launch),
+                                  label: const Text('達成'),
                                 ),
-                              );
-                            },
-                            icon: const Icon(Icons.rocket_launch),
-                            label: const Text('達成'),
-                          ),
-                          onTap: () => _edit(t),
+                                onTap: () => _edit(t),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 12),
-                    ],
-                  ),
                 ),
               ],
             );
@@ -365,83 +358,83 @@ class _TodoPageState extends State<TodoPage> {
 
     return showDialog<_EditData>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(initial == null ? '新しいタスク' : 'タスクを編集'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleCtrl,
-                autofocus: true,
-                decoration: const InputDecoration(hintText: '例）レポート提出'),
-                onSubmitted: (_) => Navigator.of(
-                  context,
-                ).pop(_EditData(titleCtrl.text, due, syncCal)),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      due == null
-                          ? '期限: なし'
-                          : '期限: ' +
-                                DateFormat('yyyy/MM/dd HH:mm').format(due!),
+      builder: (context) {
+        final nav = Navigator.of(context); // ← 退避
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: Text(initial == null ? '新しいタスク' : 'タスクを編集'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  autofocus: true,
+                  decoration: const InputDecoration(hintText: '例）レポート提出'),
+                  onSubmitted: (_) =>
+                      nav.pop(_EditData(titleCtrl.text, due, syncCal)),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        due == null
+                            ? '期限: なし'
+                            : '期限: ${DateFormat('yyyy/MM/dd HH:mm').format(due!)}',
+                      ),
                     ),
-                  ),
-                  TextButton.icon(
-                    onPressed: () async {
-                      final now = DateTime.now();
-                      final date = await showDatePicker(
-                        context: context,
-                        firstDate: DateTime(now.year - 1),
-                        lastDate: DateTime(now.year + 2),
-                        initialDate: due ?? now,
-                      );
-                      if (date == null) return;
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.fromDateTime(due ?? now),
-                      );
-                      if (time == null) return;
-                      setState(() {
-                        due = DateTime(
-                          date.year,
-                          date.month,
-                          date.day,
-                          time.hour,
-                          time.minute,
+                    TextButton.icon(
+                      onPressed: () async {
+                        final now = DateTime.now();
+                        final date = await showDatePicker(
+                          context: context,
+                          firstDate: DateTime(now.year - 1),
+                          lastDate: DateTime(now.year + 2),
+                          initialDate: due ?? now,
                         );
-                      });
-                    },
-                    icon: const Icon(Icons.event),
-                    label: const Text('期限設定'),
-                  ),
-                ],
+                        if (date == null) return;
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.fromDateTime(due ?? now),
+                        );
+                        if (time == null) return;
+                        setState(() {
+                          due = DateTime(
+                            date.year,
+                            date.month,
+                            date.day,
+                            time.hour,
+                            time.minute,
+                          );
+                        });
+                      },
+                      icon: const Icon(Icons.event),
+                      label: const Text('期限設定'),
+                    ),
+                  ],
+                ),
+                CheckboxListTile(
+                  value: syncCal,
+                  onChanged: (v) => setState(() => syncCal = v ?? false),
+                  title: const Text('Google カレンダーに登録/更新する'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => nav.pop(),
+                child: const Text('キャンセル'),
               ),
-              CheckboxListTile(
-                value: syncCal,
-                onChanged: (v) => setState(() => syncCal = v ?? false),
-                title: const Text('Google カレンダーに登録/更新する'),
-                controlAffinity: ListTileControlAffinity.leading,
+              FilledButton(
+                onPressed: () =>
+                    nav.pop(_EditData(titleCtrl.text, due, syncCal)),
+                child: const Text('保存'),
               ),
             ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('キャンセル'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(
-                context,
-              ).pop(_EditData(titleCtrl.text, due, syncCal)),
-              child: const Text('保存'),
-            ),
-          ],
-        ),
-      ),
+        );
+      },
     );
   }
 }

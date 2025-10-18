@@ -3,11 +3,12 @@ import 'package:intl/intl.dart';
 import '../models/todo.dart';
 import '../services/calendar_service.dart';
 import '../services/fatigue_service.dart' as fatigue;
-import '../services/frontload_scheduler.dart';
+// import '../services/frontload_scheduler.dart';
 import '../services/todo_repository.dart';
 import '../widgets/sign_in_button.dart';
 import '../main.dart' show auth; // ← main.dart のグローバル auth を再利用
 import 'package:table_calendar/table_calendar.dart';
+import '../services/notification_service.dart';
 
 class TodoPage extends StatefulWidget {
   const TodoPage({super.key, required this.repo});
@@ -20,7 +21,7 @@ class TodoPage extends StatefulWidget {
 class _TodoPageState extends State<TodoPage> {
   late final CalendarService _calendar;
   late final TodoRepository _repo;
-  late final FrontloadScheduler _frontload;
+  //late final FrontloadScheduler _frontload;
 
   @override
   void initState() {
@@ -32,26 +33,26 @@ class _TodoPageState extends State<TodoPage> {
     // 依存の初期化（auth は main.dart のグローバルを使う）
     _calendar = CalendarService(auth);
     _repo = TodoRepository(_calendar);
-    _frontload = FrontloadScheduler(fatigue.FatigueService(), _repo, _calendar);
+    // _frontload = FrontloadScheduler(fatigue.FatigueService(), _repo, _calendar);
 
-    // 初回フレーム後に実行：前倒し → （必要なら）実期限へ切替
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final changed = await _frontload.tickAndMaybeFrontload();
-      if (mounted &&
-          changed > 0 &&
-          !fatigue.FatigueService.isQuietHour(DateTime.now())) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('疲労度により $changed 件の期限を前倒ししました')));
-      }
+    //初回フレーム後に実行：前倒し → （必要なら）実期限へ切替
+    // WidgetsBinding.instance.addPostFrameCallback((_) async {
+    //   final changed = await _frontload.tickAndMaybeFrontload();
+    //   if (mounted &&
+    //       changed > 0 &&
+    //       !fatigue.FatigueService.isQuietHour(DateTime.now())) {
+    // ScaffoldMessenger.of(
+    //   context,
+    // ).showSnackBar(SnackBar(content: Text('疲労度により $changed 件の期限を前倒ししました')));
+    // }
 
-      final switched = await _repo.switchOverdueToReal();
-      if (mounted && switched > 0) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$switched 件を本当の期限へ更新しました')));
-      }
-    });
+    // final switched = await _repo.switchOverdueToReal();
+    // if (mounted && switched > 0) {
+    // ScaffoldMessenger.of(
+    //   context,
+    // ).showSnackBar(SnackBar(content: Text('$switched 件を本当の期限へ更新しました')));
+    //     }
+    //   });
   }
 
   @override
@@ -165,6 +166,10 @@ class _TodoPageState extends State<TodoPage> {
                     firstDay: DateTime.utc(2020, 1, 1),
                     lastDay: DateTime.utc(2030, 12, 31),
                     focusedDay: DateTime.now(),
+                    calendarFormat: CalendarFormat.month, // ← 月表示に固定
+                    availableCalendarFormats: const {
+                      CalendarFormat.month: 'Month', // ← 1種類にすればボタンが消える
+                    },
                     eventLoader: (day) {
                       final d = DateTime(day.year, day.month, day.day);
                       return byDay[d] ?? [];
@@ -322,12 +327,29 @@ class _TodoPageState extends State<TodoPage> {
     if (data == null || data.title.trim().isEmpty) return;
     await _repo.addTodo(
       title: data.title.trim(),
-      realDue:
-          (data.due ??
-          DateTime.now().add(const Duration(days: 7))), // 期限未指定なら仮で+7日
+      realDue: data.due ?? DateTime.now().add(const Duration(days: 7)),
       bufferDays: 3, // 前倒しの既定日数（必要ならUIから渡す）
       syncToCalendar: data.syncCal,
     );
+
+    const bool debugNotification = true; // ← あなたのフラグ
+
+    // 2) 期限がある場合のみデモ通知
+    if (debugNotification && data.due != null) {
+      final daysLeft = _daysLeftFromNow(data.due!, DateTime.now());
+      await NotificationService.instance.scheduleTaskReminderInSeconds(
+        title: data.title.trim(),
+        daysLeft: daysLeft,
+        seconds: 5,
+      );
+    }
+  }
+
+  // 日数計算
+  int _daysLeftFromNow(DateTime due, DateTime now) {
+    final d0 = DateTime(now.year, now.month, now.day);
+    final d1 = DateTime(due.year, due.month, due.day);
+    return d1.difference(d0).inDays;
   }
 
   Future<void> _edit(Todo t) async {

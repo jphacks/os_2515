@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../models/todo.dart';
 import 'calendar_service.dart';
 import 'fatigue_service.dart';
+import 'dart:math'; // 日付の前倒しをランダムにするために追加 (issue-5)
 
 class TodoRepository {
   TodoRepository(this._calendar);
@@ -11,6 +12,9 @@ class TodoRepository {
   final _db = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
   final CalendarService _calendar;
+  static const List<int> initialBufferDays = [1, 2, 3, 4, 5, 6, 7]; // 前倒し用ランダム日数リスト
+  static const List<int> anchorHours = [0, 6, 12, 18]; // 前倒し用ランダム時刻リスト
+  final _random = Random();
 
   String? get _uid => _auth.currentUser?.uid;
 
@@ -62,14 +66,21 @@ class TodoRepository {
   Future<void> addTodo({
     required String title,
     required DateTime realDue,
-    int bufferDays = 3,
+    int bufferDays = 3, // 諸悪の根源(issue-5)
     bool syncToCalendar = true,
   }) async {
     final uid = _uid;
     if (uid == null) throw StateError('Not signed in');
     final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
 
-    final displayed = realDue.subtract(Duration(days: bufferDays));
+    // 前倒し日数リストからランダムで選択(issue-5)
+    final int randomIndex = _random.nextInt(initialBufferDays.length);
+    final int randomDays = initialBufferDays[randomIndex];
+
+    // final displayed = realDue.subtract(Duration(days: bufferDays));
+    final candidate_displayed = realDue.subtract(Duration(days: randomDays)); // ランダムに選択された日数を引くように修正(issue-5)
+    final displayed = candidate_displayed.isBefore(today) ? today : candidate_displayed; // 今日の日付よりも前になっていないかを確認(issue-5)
 
     String? eventId;
     if (syncToCalendar) {
@@ -197,6 +208,12 @@ class TodoRepository {
     }
   }
 
-  DateTime _anchor0900(DateTime base) =>
-      DateTime(base.year, base.month, base.day, 9, 0);
+//   DateTime _anchor0900(DateTime base) =>
+//       DateTime(base.year, base.month, base.day, 9, 0);
+// }
+  DateTime _anchor0900(DateTime base){ // 0900とは言っているが、時間をランダムに変更したもの(issue-5)
+    final int randomIndex = _random.nextInt(anchorHours.length);
+    final int randomHour = anchorHours[randomIndex];
+    return DateTime(base.year, base.month, base.day, randomHour, 0);
+  }
 }

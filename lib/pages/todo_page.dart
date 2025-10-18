@@ -7,6 +7,7 @@ import '../services/frontload_scheduler.dart';
 import '../services/todo_repository.dart';
 import '../widgets/sign_in_button.dart';
 import '../main.dart' show auth; // ← main.dart のグローバル auth を再利用
+import 'package:table_calendar/table_calendar.dart';
 
 class TodoPage extends StatefulWidget {
   const TodoPage({super.key, required this.repo});
@@ -102,73 +103,202 @@ class _TodoPageState extends State<TodoPage> {
             // 🔸データを取り出す（null安全）
             final todos = snap.data ?? const <Todo>[];
             if (todos.isEmpty) return const _EmptyState();
-            return ListView(
-              padding: const EdgeInsets.only(bottom: 96),
+            // return ListView(
+            //   padding: const EdgeInsets.only(bottom: 96),
+            //   children: [
+            //     // ===== アクティブ一覧 =====
+            //     ...todos.map(
+            //       (t) => ListTile(
+            //         title: Text(t.title, style: const TextStyle()),
+            //         subtitle: Text(_daysLeftLabel(t)),
+            //         trailing: FilledButton.icon(
+            //           onPressed: () async {
+            //             // ← ここはあなたの “達成” ダイアログ＆complete() 呼び出しの中身をそのまま流用してください
+            //             // 例：
+            //             final ok =
+            //                 await showDialog<bool>(
+            //                   context: context,
+            //                   builder: (c) => AlertDialog(
+            //                     title: const Text('達成しますか？'),
+            //                     content: Text('"${t.title}" を達成済みにします'),
+            //                     actions: [
+            //                       TextButton(
+            //                         onPressed: () => Navigator.pop(c, false),
+            //                         child: const Text('キャンセル'),
+            //                       ),
+            //                       FilledButton(
+            //                         onPressed: () => Navigator.pop(c, true),
+            //                         child: const Text('達成する'),
+            //                       ),
+            //                     ],
+            //                   ),
+            //                 ) ??
+            //                 false;
+            //             if (!ok) return;
+
+            //             await _repo.complete(t);
+            //             if (!context.mounted) return;
+
+            //             final now = DateTime.now();
+            //             final due = t.realDue ?? t.displayedDue ?? now;
+            //             final lead = Todo.earlyDaysOnComplete(
+            //               realDue: due,
+            //               completedAt: now,
+            //             );
+
+            //             await showDialog<void>(
+            //               context: context,
+            //               builder: (c) => AlertDialog(
+            //                 title: const Text('🎉 Congratulation!'),
+            //                 content: Text(
+            //                   '「${t.title}」を達成！\n$lead 日の余裕をつくれました',
+            //                 ),
+            //                 actions: [
+            //                   FilledButton(
+            //                     onPressed: () => Navigator.pop(c),
+            //                     child: const Text('OK'),
+            //                   ),
+            //                 ],
+            //               ),
+            //             );
+            //           },
+            //           icon: const Icon(Icons.rocket_launch),
+            //           label: const Text('達成'),
+            //         ),
+            //         onTap: () => _edit(t),
+            //       ),
+            //     ),
+
+            //     const SizedBox(height: 12),
+            //   ],
+            // );
+            // 🔸 データを取り出す（null安全）
+
+            // 🔸 カレンダーで使う日付ごとのタスク一覧を作る
+            final Map<DateTime, List<Todo>> byDay = {};
+            for (final t in todos) {
+              final due = t.realDue ?? t.displayedDue;
+              if (due == null) continue;
+              final key = DateTime(due.year, due.month, due.day);
+              (byDay[key] ??= []).add(t);
+            }
+
+            // 🔸 上半分にカレンダー、下半分にリストを表示
+            return Column(
               children: [
-                // ===== アクティブ一覧 =====
-                ...todos.map(
-                  (t) => ListTile(
-                    title: Text(t.title, style: const TextStyle()),
-                    subtitle: Text(_daysLeftLabel(t)),
-                    trailing: FilledButton.icon(
-                      onPressed: () async {
-                        // ← ここはあなたの “達成” ダイアログ＆complete() 呼び出しの中身をそのまま流用してください
-                        // 例：
-                        final ok =
-                            await showDialog<bool>(
-                              context: context,
-                              builder: (c) => AlertDialog(
-                                title: const Text('達成しますか？'),
-                                content: Text('"${t.title}" を達成済みにします'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(c, false),
-                                    child: const Text('キャンセル'),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () => Navigator.pop(c, true),
-                                    child: const Text('達成する'),
-                                  ),
-                                ],
+                // 🗓 上半分：カレンダー表示
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                  child: TableCalendar(
+                    firstDay: DateTime.utc(2020, 1, 1),
+                    lastDay: DateTime.utc(2030, 12, 31),
+                    focusedDay: DateTime.now(),
+                    eventLoader: (day) {
+                      final d = DateTime(day.year, day.month, day.day);
+                      return byDay[d] ?? [];
+                    },
+                    calendarStyle: const CalendarStyle(
+                      todayDecoration: BoxDecoration(
+                        color: Colors.blueAccent,
+                        shape: BoxShape.circle,
+                      ),
+                      markerDecoration: BoxDecoration(
+                        color: Colors.deepOrange,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    calendarBuilders: CalendarBuilders(
+                      markerBuilder: (context, day, events) {
+                        if (events.isEmpty) return const SizedBox();
+                        return Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 3),
+                            child: Text(
+                              '${events.length}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.redAccent,
                               ),
-                            ) ??
-                            false;
-                        if (!ok) return;
-
-                        await _repo.complete(t);
-                        if (!context.mounted) return;
-
-                        final now = DateTime.now();
-                        final due = t.realDue ?? t.displayedDue ?? now;
-                        final lead = Todo.earlyDaysOnComplete(
-                          realDue: due,
-                          completedAt: now,
-                        );
-
-                        await showDialog<void>(
-                          context: context,
-                          builder: (c) => AlertDialog(
-                            title: const Text('🎉 Congratulation!'),
-                            content: Text(
-                              '「${t.title}」を達成！\n$lead 日の余裕をつくれました',
                             ),
-                            actions: [
-                              FilledButton(
-                                onPressed: () => Navigator.pop(c),
-                                child: const Text('OK'),
-                              ),
-                            ],
                           ),
                         );
                       },
-                      icon: const Icon(Icons.rocket_launch),
-                      label: const Text('達成'),
                     ),
-                    onTap: () => _edit(t),
                   ),
                 ),
 
-                const SizedBox(height: 12),
+                const Divider(height: 1),
+
+                // 🗒 下半分：タスクリスト
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.only(bottom: 96),
+                    children: [
+                      ...todos.map(
+                        (t) => ListTile(
+                          title: Text(t.title, style: const TextStyle()),
+                          subtitle: Text(_daysLeftLabel(t)),
+                          trailing: FilledButton.icon(
+                            onPressed: () async {
+                              final ok =
+                                  await showDialog<bool>(
+                                    context: context,
+                                    builder: (c) => AlertDialog(
+                                      title: const Text('達成しますか？'),
+                                      content: Text('"${t.title}" を達成済みにします'),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(c, false),
+                                          child: const Text('キャンセル'),
+                                        ),
+                                        FilledButton(
+                                          onPressed: () =>
+                                              Navigator.pop(c, true),
+                                          child: const Text('達成する'),
+                                        ),
+                                      ],
+                                    ),
+                                  ) ??
+                                  false;
+                              if (!ok) return;
+
+                              await _repo.complete(t);
+                              if (!context.mounted) return;
+                              final now = DateTime.now();
+                              final due = t.realDue ?? t.displayedDue ?? now;
+                              final lead = Todo.earlyDaysOnComplete(
+                                realDue: due,
+                                completedAt: now,
+                              );
+
+                              await showDialog<void>(
+                                context: context,
+                                builder: (c) => AlertDialog(
+                                  title: const Text('🎉 Congratulation!'),
+                                  content: Text(
+                                    '「${t.title}」を達成！\n$lead 日の余裕をつくれました',
+                                  ),
+                                  actions: [
+                                    FilledButton(
+                                      onPressed: () => Navigator.pop(c),
+                                      child: const Text('OK'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.rocket_launch),
+                            label: const Text('達成'),
+                          ),
+                          onTap: () => _edit(t),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ),
+                ),
               ],
             );
           },

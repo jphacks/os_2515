@@ -16,10 +16,10 @@ dependencies {
   implementation("com.google.firebase:firebase-analytics")
 
 
-  // Add the dependencies for any other desired Firebase products
+  // Add the dependencies for any other desired Firebase productsS
   // https://firebase.google.com/docs/android/setup#available-libraries
 
-  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+  coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 android {

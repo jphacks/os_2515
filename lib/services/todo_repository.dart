@@ -258,9 +258,39 @@ Future<List<Todo>> listAll() async {
 //   DateTime _anchor0900(DateTime base) =>
 //       DateTime(base.year, base.month, base.day, 9, 0);
 // }
-  DateTime _anchor0900(DateTime base){ // 0900とは言っているが、時間をランダムに変更したもの(issue-5)
-    final int randomIndex = _random.nextInt(anchorHours.length);
-    final int randomHour = anchorHours[randomIndex];
-    return DateTime(base.year, base.month, base.day, randomHour, 0);
-  }
+  // DateTime _anchor0900(DateTime base){ // 0900とは言っているが、時間をランダムに変更したもの(issue-5)
+  //   final int randomIndex = _random.nextInt(anchorHours.length);
+  //   final int randomHour = anchorHours[randomIndex];
+  //   return DateTime(base.year, base.month, base.day, randomHour, 0);
+  // }
+DateTime _anchor0900(DateTime base){ // 0900とは言っているが、時間をランダムに変更したもの(issue-5)
+		final now = DateTime.now();
+		
+		if (base.year == now.year && base.month == now.month && base.day == now.day) {
+
+			final List<int> validHours = [];
+			for (final hour in anchorHours) {
+				final candidateTime = DateTime(base.year, base.month, base.day, hour, 0);
+				
+				// 厳密に現在時刻より後であるかを確認 (12:16 > 12:00 を回避)
+				if (candidateTime.isAfter(now)) {
+					validHours.add(hour);
+				}
+			}
+
+			if (validHours.isNotEmpty) {
+				// 使える時間がある場合: ランダム
+				final randomIndex = _random.nextInt(validHours.length);
+				final randomHour = validHours[randomIndex];
+				return DateTime(base.year, base.month, base.day, randomHour, 0);
+			} else {
+				// 使える時間がない場合（今日のアンカー時刻をすべて過ぎた）今日の23時59分を返す
+				return DateTime(base.year, base.month, base.day, 23, 59);
+			}
+		} 
+		
+		final int randomIndex = _random.nextInt(anchorHours.length);
+		final int randomHour = anchorHours[randomIndex];
+		return DateTime(base.year, base.month, base.day, randomHour, 0);
+	}
 }

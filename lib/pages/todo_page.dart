@@ -368,8 +368,8 @@ int _lastFeverChanged = 0;
         ),
        ],
       ),
-		);
-	}
+    );
+  }
 
 	String _daysLeftLabel(Todo t) {
 		final now = DateTime.now();

@@ -29,7 +29,7 @@
 
 ## アプリ紹介動画
 https://youtu.be/UCA42WrsM7Q?si=1_e9EURF_emCRMAs
-[!['アプリ紹介動画']('https://img.youtube.com/vi/UCA42WrsM7Q/1.jpg')]('https://youtu.be/UCA42WrsM7Q?si=1_e9EURF_emCRMAs')
+[!['アプリ紹介動画'](https://img.youtube.com/vi/UCA42WrsM7Q/1.jpg)](https://youtu.be/UCA42WrsM7Q?si=1_e9EURF_emCRMAs)
 
 ## 開発技術
 ### 活用した技術

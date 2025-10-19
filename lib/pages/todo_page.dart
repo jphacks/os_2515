@@ -436,9 +436,9 @@ int _lastFeverChanged = 0;
 
 	Future<_EditData?> _showEditDialog({Todo? initial}) async {
 		final titleCtrl = TextEditingController(text: initial?.title ?? '');
-		DateTime? due = initial == null
+    DateTime? due = initial == null
 			? null
-			: (initial.realDue ?? initial.displayedDue);
+			: initial.displayedDue;
 		bool syncCal = initial?.calendarEventId != null;
 
 		// TodoモデルにinitialMoodValueがないため、初期値を1に設定

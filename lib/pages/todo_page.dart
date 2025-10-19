@@ -386,7 +386,7 @@ int _lastFeverChanged = 0;
 	Future<void> _add() async {
 		final data = await _showEditDialog();
 		if (data == null || data.title.trim().isEmpty || data.moodValue == null) return;
-		await _repo.addTodo(
+		final finalDisplayedDue = await _repo.addTodo(
 			title: data.title.trim(),
       realDue: data.due ?? DateTime.now().add(const Duration(days: 7)),
 			bufferDays: 3, // 前倒しの既定日数（必要ならUIから渡す）
@@ -394,11 +394,10 @@ int _lastFeverChanged = 0;
 			moodValue: data.moodValue!,
 		);
 
-        const bool debugNotification = true; // ← あなたのフラグ
+    const bool debugNotification = true; // ← あなたのフラグ
 
-    // 2) 期限がある場合のみデモ通知
-    if (debugNotification && data.due != null) {
-      final daysLeft = _daysLeftFromNow(data.due!, DateTime.now());
+    if (debugNotification) {
+      final daysLeft = _daysLeftFromNow(finalDisplayedDue, DateTime.now());
       await NotificationService.instance.scheduleTaskReminderInSeconds(
         title: data.title.trim(),
         daysLeft: daysLeft,

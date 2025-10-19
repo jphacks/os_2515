@@ -64,50 +64,104 @@ class TodoRepository {
   }
 
   // ===== 追加 =====
-  Future<void> addTodo({
-    required String title,
-    required DateTime realDue,
-    int bufferDays = 3, // 諸悪の根源(issue-5)
-    bool syncToCalendar = true,
-    required int moodValue, //issue-11
-  }) async {
-    final uid = _uid;
-    if (uid == null) throw StateError('Not signed in');
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+  // Future<void> addTodo({
+  //   required String title,
+  //   required DateTime realDue,
+  //   int bufferDays = 3, // 諸悪の根源(issue-5)
+  //   bool syncToCalendar = true,
+  //   required int moodValue, //issue-11
+  // }) async {
+  //   final uid = _uid;
+  //   if (uid == null) throw StateError('Not signed in');
+  //   final now = DateTime.now();
+  //   final today = DateTime(now.year, now.month, now.day);
 
-    // 前倒し日数リストからランダムで選択(issue-5)
-    final int randomIndex = _random.nextInt(initialBufferDays.length);
-    final int randomDays = initialBufferDays[randomIndex];
-    final int backDays = randomDays + moodValue;
+  //   // 前倒し日数リストからランダムで選択(issue-5)
+  //   final int randomIndex = _random.nextInt(initialBufferDays.length);
+  //   final int randomDays = initialBufferDays[randomIndex];
+  //   final int backDays = randomDays + moodValue;
 
-    // final displayed = realDue.subtract(Duration(days: bufferDays));
-    final candidate_displayed = realDue.subtract(Duration(days: backDays)); // ランダムに選択された日数を引くように修正(issue-5)
-    final displayed = candidate_displayed.isBefore(today) ? today : candidate_displayed; // 今日の日付よりも前になっていないかを確認(issue-5)
+  //   // final displayed = realDue.subtract(Duration(days: bufferDays));
+  //   final candidate_displayed = realDue.subtract(Duration(days: backDays)); // ランダムに選択された日数を引くように修正(issue-5)
+  //   final displayed = candidate_displayed.isBefore(today) ? today : candidate_displayed; // 今日の日付よりも前になっていないかを確認(issue-5)
 
-    String? eventId;
-    if (syncToCalendar) {
-      eventId = await _calendar.createEvent(
-        summary: title,
-        start: await _anchor0900(displayed),
-        end: (await _anchor0900(displayed)).add(const Duration(hours: 1)),
-        description: 'source=todo-app',
-      );
-    }
+  //   String? eventId;
+  //   if (syncToCalendar) {
+  //     eventId = await _calendar.createEvent(
+  //       summary: title,
+  //       start: await _anchor0900(displayed),
+  //       end: (await _anchor0900(displayed)).add(const Duration(hours: 1)),
+  //       description: 'source=todo-app',
+  //     );
+  //   }
 
-    await _colFor(uid).add({
-      'title': title,
-      'displayedDue': Timestamp.fromDate(await _anchor0900(displayed)),
-      'realDue': Timestamp.fromDate(await _anchor0900(realDue)),
-      'calendarEventId': eventId,
-      'state': 'active',
-      'completedAt': null,
-      'switchedAt': null,
-      'leadDays': 0,
-      'createdAt': Timestamp.fromDate(now),
-      'updatedAt': Timestamp.fromDate(now),
-    });
-  }
+  //   await _colFor(uid).add({
+  //     'title': title,
+  //     'displayedDue': Timestamp.fromDate(await _anchor0900(displayed)),
+  //     'realDue': Timestamp.fromDate(await _anchor0900(realDue)),
+  //     'calendarEventId': eventId,
+  //     'state': 'active',
+  //     'completedAt': null,
+  //     'switchedAt': null,
+  //     'leadDays': 0,
+  //     'createdAt': Timestamp.fromDate(now),
+  //     'updatedAt': Timestamp.fromDate(now),
+  //   });
+  // }
+
+  // 変更点: Future<void> を Future<DateTime> に変更
+	Future<DateTime> addTodo({ 
+		required String title,
+		required DateTime realDue,
+		int bufferDays = 3,
+		bool syncToCalendar = true,
+		required int moodValue,
+	}) async {
+		final uid = _uid;
+		if (uid == null) throw StateError('Not signed in');
+		final now = DateTime.now();
+		final today = DateTime(now.year, now.month, now.day);
+
+		// 前倒し日数リストからランダムで選択(issue-5)
+		final int randomIndex = _random.nextInt(initialBufferDays.length);
+		final int randomDays = initialBufferDays[randomIndex];
+		final int backDays = randomDays + moodValue;
+
+		// 前倒しされた日付を計算
+		final candidate_displayed = realDue.subtract(Duration(days: backDays));
+		final displayed = candidate_displayed.isBefore(today) ? today : candidate_displayed;
+
+		// 💡 Softmax時刻付きの前倒し期限を計算 (displayedDue)
+		final finalDisplayedDue = await _anchor0900(displayed); // 👈 変数に格納
+		final finalRealDue = await _anchor0900(realDue);
+
+		String? eventId;
+		if (syncToCalendar) {
+			final eventEnd = finalDisplayedDue.add(const Duration(hours: 1)); // 👈 格納した変数を使用
+			eventId = await _calendar.createEvent(
+				summary: title,
+				start: finalDisplayedDue, // 👈 格納した変数を使用
+				end: eventEnd,
+				description: 'source=todo-app',
+			);
+		}
+
+		await _colFor(uid).add({
+			'title': title,
+			'displayedDue': Timestamp.fromDate(finalDisplayedDue), // 👈 格納した変数を使用
+			'realDue': Timestamp.fromDate(finalRealDue), // 👈 格納した変数を使用
+			'calendarEventId': eventId,
+			'state': 'active',
+			'completedAt': null,
+			'switchedAt': null,
+			'leadDays': 0,
+			'createdAt': Timestamp.fromDate(now),
+			'updatedAt': Timestamp.fromDate(now),
+		});
+		
+		// 💡 変更点: 確定した前倒し後の期限を返す
+		return finalDisplayedDue; 
+	}
 
   // ===== 表示→実期限への切替 =====
   Future<int> switchOverdueToReal() async {

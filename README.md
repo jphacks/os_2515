@@ -2,7 +2,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/logo-naruhaya-dark.png">
-    <img alt="なるはや ロゴ" src="./logo-naruhaya.png" width="200">
+    <img alt="なるはや ロゴ" src="./logo-naruhaya.png" width="400">
   </picture>
 </p>
 

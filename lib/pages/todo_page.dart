@@ -9,6 +9,8 @@ import '../widgets/sign_in_button.dart';
 import '../main.dart' show auth; // ← main.dart のグローバル auth を再利用
 import 'package:table_calendar/table_calendar.dart';
 import '../services/notification_service.dart';
+import '../services/fever_time_service.dart';
+import '../widgets/fever_overlay.dart' as fever;
 
 class TodoPage extends StatefulWidget {
   const TodoPage({super.key, required this.repo});
@@ -21,6 +23,10 @@ class TodoPage extends StatefulWidget {
 class _TodoPageState extends State<TodoPage> {
   late final CalendarService _calendar;
   late final TodoRepository _repo;
+  //final ValueNotifier<bool> _showFever = ValueNotifier(false);
+  bool _feverVisible = false;
+  late final FeverTimeService _fever;
+  //final fever.FeverOverlayController _feverCtrl = fever.FeverOverlayController();
   //late final FrontloadScheduler _frontload;
 
   @override
@@ -33,6 +39,8 @@ class _TodoPageState extends State<TodoPage> {
     // 依存の初期化（auth は main.dart のグローバルを使う）
     _calendar = CalendarService(auth);
     _repo = TodoRepository(_calendar);
+    _fever = FeverTimeService(_repo, _calendar); 
+    
     // _frontload = FrontloadScheduler(fatigue.FatigueService(), _repo, _calendar);
 
     //初回フレーム後に実行：前倒し → （必要なら）実期限へ切替
@@ -56,10 +64,31 @@ class _TodoPageState extends State<TodoPage> {
   }
 
   @override
+  void dispose() {
+    //_showFever.dispose();
+    super.dispose();
+  }
+int _lastFeverChanged = 0;
+  Future<void> _runFever() async {
+    if (!mounted) return;
+  setState(() => _feverVisible = true);   // 表示（入場→音声→退場は Overlay 側で制御）
+
+  final changed = await _fever.trigger(
+    selectProb: 1.0,
+    maxPerDay: 2,        // 1日あたりの上限。均等に敷き詰め
+    syncCalendar: true,
+  );
+
+  _lastFeverChanged = changed;
+}
+
+
+  @override
   Widget build(BuildContext context) {
     return SignInGate(
       auth: auth,
-      child: Scaffold(
+      child: Stack(
+       children: [Scaffold(
         appBar: AppBar(
           title: const Text('Leeway'),
           actions: [
@@ -82,6 +111,11 @@ class _TodoPageState extends State<TodoPage> {
             //   icon: const Icon(Icons.logout),
             //   onPressed: () => auth.signOut(),
             // ),
+            TextButton.icon(
+                onPressed: _runFever,
+                icon: const Icon(Icons.bolt, color: Colors.amber),
+                label: const Text('Fever!', style: TextStyle(color: Colors.amber)),
+              ),
           ],
         ),
         body: StreamBuilder<List<Todo>>(
@@ -306,6 +340,26 @@ class _TodoPageState extends State<TodoPage> {
           icon: const Icon(Icons.add),
           label: const Text('追加'),
         ),
+      ),
+      // オーバーレイ（Builder を使わずにシンプルに条件描画）
+       // 右→左に出現、exit() で右へ戻る
+      if (_feverVisible)
+        fever.FeverOverlay(
+          line: '今週頑張んなきゃ、あんたのことなんかきらいになっちゃうんだからね！',
+          assetImagePath: 'assets/images/fever1.png',
+          voiceAssetPath: 'audio/fever_start.wav', // 使うなら
+          preDelayMs: 400,
+          lingerMs: 1000,     // 再生後の余韻
+          minVisibleMs: 6000, // 出現してからの最低滞在
+          onFinished: () {
+            if (!mounted) return;
+            setState(() => _feverVisible = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('フィーバー適用：$_lastFeverChanged 件を1週間に前倒ししました')),
+            );
+          },
+        ),
+       ],
       ),
     );
   }

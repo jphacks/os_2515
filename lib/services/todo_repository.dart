@@ -68,6 +68,7 @@ class TodoRepository {
     required DateTime realDue,
     int bufferDays = 3, // 諸悪の根源(issue-5)
     bool syncToCalendar = true,
+    required int moodValue, //issue-11
   }) async {
     final uid = _uid;
     if (uid == null) throw StateError('Not signed in');
@@ -77,9 +78,10 @@ class TodoRepository {
     // 前倒し日数リストからランダムで選択(issue-5)
     final int randomIndex = _random.nextInt(initialBufferDays.length);
     final int randomDays = initialBufferDays[randomIndex];
+    final int backDays = randomDays + moodValue;
 
     // final displayed = realDue.subtract(Duration(days: bufferDays));
-    final candidate_displayed = realDue.subtract(Duration(days: randomDays)); // ランダムに選択された日数を引くように修正(issue-5)
+    final candidate_displayed = realDue.subtract(Duration(days: backDays)); // ランダムに選択された日数を引くように修正(issue-5)
     final displayed = candidate_displayed.isBefore(today) ? today : candidate_displayed; // 今日の日付よりも前になっていないかを確認(issue-5)
 
     String? eventId;
@@ -206,7 +208,7 @@ class TodoRepository {
         _uid!,
       ).doc(todo.id).update({'updatedAt': Timestamp.fromDate(now)});
     }
-  }
+ }
 
 Future<void> updateDisplayedDue(String todoId, DateTime newDisplayed) async {
   final uid = _uid;
@@ -251,7 +253,7 @@ Future<List<Todo>> listAll() async {
   });
 
   return list;
-}
+  }
 
 //   DateTime _anchor0900(DateTime base) =>
 //       DateTime(base.year, base.month, base.day, 9, 0);

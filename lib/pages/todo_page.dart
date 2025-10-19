@@ -13,34 +13,41 @@ import '../services/fever_time_service.dart';
 import '../widgets/fever_overlay.dart' as fever;
 
 class TodoPage extends StatefulWidget {
-  const TodoPage({super.key, required this.repo});
-  final TodoRepository repo;
+	const TodoPage({super.key, required this.repo});
+	final TodoRepository repo;
 
-  @override
-  State<TodoPage> createState() => _TodoPageState();
+	@override
+	State<TodoPage> createState() => _TodoPageState();
 }
 
 class _TodoPageState extends State<TodoPage> {
-  late final CalendarService _calendar;
-  late final TodoRepository _repo;
+	late final CalendarService _calendar;
+	late final TodoRepository _repo;
   //final ValueNotifier<bool> _showFever = ValueNotifier(false);
   bool _feverVisible = false;
   late final FeverTimeService _fever;
   //final fever.FeverOverlayController _feverCtrl = fever.FeverOverlayController();
   //late final FrontloadScheduler _frontload;
 
-  @override
-  void initState() {
-    super.initState();
+	// 💡 修正: _moodMap はインスタンスフィールドとして維持
+	final Map<String, int> _moodMap = {
+		'💪 (hard)': 2,
+		'😐 (normal)': 1,
+		'✨ (easy)': 0,
+	};
 
-    // ★ テスト時のみ ON。テスト後は false に戻すのを忘れずに！
-    fatigue.FatigueService.debugAlwaysFire = true;
+	@override
+	void initState() {
+		super.initState();
 
-    // 依存の初期化（auth は main.dart のグローバルを使う）
-    _calendar = CalendarService(auth);
-    _repo = TodoRepository(_calendar);
-    _fever = FeverTimeService(_repo, _calendar); 
-    
+		// ★ テスト時のみ ON。テスト後は false に戻すのを忘れずに！
+		fatigue.FatigueService.debugAlwaysFire = true;
+
+		// 依存の初期化（auth は main.dart のグローバルを使う）
+		_calendar = CalendarService(auth);
+		_repo = TodoRepository(_calendar);
+    _fever = FeverTimeService(_repo, _calendar);
+
     // _frontload = FrontloadScheduler(fatigue.FatigueService(), _repo, _calendar);
 
     //初回フレーム後に実行：前倒し → （必要なら）実期限へ切替
@@ -61,9 +68,9 @@ class _TodoPageState extends State<TodoPage> {
     // ).showSnackBar(SnackBar(content: Text('$switched 件を本当の期限へ更新しました')));
     //     }
     //   });
-  }
+	}
 
-  @override
+    @override
   void dispose() {
     //_showFever.dispose();
     super.dispose();
@@ -83,8 +90,8 @@ int _lastFeverChanged = 0;
 }
 
 
-  @override
-  Widget build(BuildContext context) {
+	@override
+	Widget build(BuildContext context) {
     return SignInGate(
       auth: auth,
       child: Stack(
@@ -364,29 +371,30 @@ int _lastFeverChanged = 0;
     );
   }
 
-  String _daysLeftLabel(Todo t) {
-    final now = DateTime.now();
-    final due = switch (t.state) {
-      TodoState.active => t.displayedDue,
-      TodoState.switchedToReal => t.realDue,
-      TodoState.completed => t.completedAt, // ここは基本使わない
-    };
-    if (due == null) return '';
-    final x = Todo.daysLeftCeil(now, due);
-    return 'あと$x日（期限: ${DateFormat('yyyy/MM/dd').format(due)}）';
-  }
+	String _daysLeftLabel(Todo t) {
+		final now = DateTime.now();
+		final due = switch (t.state) {
+			TodoState.active => t.displayedDue,
+			TodoState.switchedToReal => t.realDue,
+			TodoState.completed => t.completedAt, // ここは基本使わない
+		};
+		if (due == null) return '';
+		final x = Todo.daysLeftCeil(now, due);
+		return 'あと$x日（期限: ${DateFormat('yyyy/MM/dd').format(due)}）';
+	}
 
-  Future<void> _add() async {
-    final data = await _showEditDialog();
-    if (data == null || data.title.trim().isEmpty) return;
-    await _repo.addTodo(
-      title: data.title.trim(),
+	Future<void> _add() async {
+		final data = await _showEditDialog();
+		if (data == null || data.title.trim().isEmpty || data.moodValue == null) return;
+		await _repo.addTodo(
+			title: data.title.trim(),
       realDue: data.due ?? DateTime.now().add(const Duration(days: 7)),
-      bufferDays: 3, // 前倒しの既定日数（必要ならUIから渡す）
-      syncToCalendar: data.syncCal,
-    );
+			bufferDays: 3, // 前倒しの既定日数（必要ならUIから渡す）
+			syncToCalendar: data.syncCal,
+			moodValue: data.moodValue!,
+		);
 
-    const bool debugNotification = true; // ← あなたのフラグ
+        const bool debugNotification = true; // ← あなたのフラグ
 
     // 2) 期限がある場合のみデモ通知
     if (debugNotification && data.due != null) {
@@ -404,144 +412,193 @@ int _lastFeverChanged = 0;
     final d0 = DateTime(now.year, now.month, now.day);
     final d1 = DateTime(due.year, due.month, due.day);
     return d1.difference(d0).inDays;
-  }
+	}
 
-  Future<void> _edit(Todo t) async {
-    final data = await _showEditDialog(initial: t);
-    if (data == null) return;
-    // 同じ内容なら何もしない
-    final newTitle = data.title.trim();
-    final currentDue = t.realDue ?? t.displayedDue;
-    final same = newTitle == t.title && data.due == currentDue;
+	Future<void> _edit(Todo t) async {
+		final data = await _showEditDialog(initial: t);
+		if (data == null || data.moodValue == null) return;
+		// 同じ内容なら何もしない
+		final newTitle = data.title.trim();
+		final currentDue = t.realDue ?? t.displayedDue;
+		final same = newTitle == t.title && data.due == currentDue;
 
-    if (same) return;
+		if (same) return;
 
-    // いったん削除して作り直す（カレンダーも再同期）
-    await _repo.addTodo(
-      title: newTitle,
-      realDue: (data.due ?? DateTime.now().add(const Duration(days: 7))),
-      bufferDays: 3,
-      syncToCalendar: data.syncCal,
-    );
-  }
+		// いったん削除して作り直す（カレンダーも再同期）
+		await _repo.addTodo(
+			title: newTitle,
+			realDue: (data.due ?? DateTime.now().add(const Duration(days: 7))),
+			bufferDays: 3,
+			syncToCalendar: data.syncCal,
+			moodValue: data.moodValue!,
+		);
+	}
 
-  Future<_EditData?> _showEditDialog({Todo? initial}) async {
-    final titleCtrl = TextEditingController(text: initial?.title ?? '');
-    DateTime? due = initial == null
-        ? null
-        : (initial.realDue ?? initial.displayedDue);
-    bool syncCal = initial?.calendarEventId != null;
+	Future<_EditData?> _showEditDialog({Todo? initial}) async {
+		final titleCtrl = TextEditingController(text: initial?.title ?? '');
+		DateTime? due = initial == null
+			? null
+			: (initial.realDue ?? initial.displayedDue);
+		bool syncCal = initial?.calendarEventId != null;
 
-    return showDialog<_EditData>(
-      context: context,
-      builder: (context) {
-        final nav = Navigator.of(context); // ← 退避
-        return StatefulBuilder(
-          builder: (context, setState) => AlertDialog(
-            title: Text(initial == null ? '新しいタスク' : 'タスクを編集'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleCtrl,
-                  autofocus: true,
-                  decoration: const InputDecoration(hintText: '例）レポート提出'),
-                  onSubmitted: (_) =>
-                      nav.pop(_EditData(titleCtrl.text, due, syncCal)),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        due == null
-                            ? '期限: なし'
-                            : '期限: ${DateFormat('yyyy/MM/dd HH:mm').format(due!)}',
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: () async {
-                        final now = DateTime.now();
-                        final date = await showDatePicker(
-                          context: context,
-                          firstDate: DateTime(now.year - 1),
-                          lastDate: DateTime(now.year + 2),
-                          initialDate: due ?? now,
-                        );
-                        if (date == null) return;
-                        final time = await showTimePicker(
-                          context: context,
-                          initialTime: TimeOfDay.fromDateTime(due ?? now),
-                        );
-                        if (time == null) return;
-                        setState(() {
-                          due = DateTime(
-                            date.year,
-                            date.month,
-                            date.day,
-                            time.hour,
-                            time.minute,
-                          );
-                        });
-                      },
-                      icon: const Icon(Icons.event),
-                      label: const Text('期限設定'),
-                    ),
-                  ],
-                ),
-                CheckboxListTile(
-                  value: syncCal,
-                  onChanged: (v) => setState(() => syncCal = v ?? false),
-                  title: const Text('Google カレンダーに登録/更新する'),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => nav.pop(),
-                child: const Text('キャンセル'),
-              ),
-              FilledButton(
-                onPressed: () =>
-                    nav.pop(_EditData(titleCtrl.text, due, syncCal)),
-                child: const Text('保存'),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
+		// TodoモデルにinitialMoodValueがないため、初期値を1に設定
+		String? selectedMoodEmoji = _moodMap.keys.firstWhere(
+			(k) => _moodMap[k] == 1, 
+			orElse: () => '😐 (normal)', 
+		);
+		int initialMoodValue = _moodMap[selectedMoodEmoji] ?? 1;
+
+		return showDialog<_EditData>(
+			context: context,
+			builder: (context) {
+				final nav = Navigator.of(context); // ← 退避
+				return StatefulBuilder(
+					builder: (context, setState) => AlertDialog(
+						title: Text(initial == null ? '新しいタスク' : 'タスクを編集'),
+						content: Column(
+							mainAxisSize: MainAxisSize.min,
+							children: [
+								// 顔文字選択
+								const Text('タスクの難易度:', style: TextStyle(fontWeight: FontWeight.bold)),
+								const SizedBox(height: 8),
+								Row(
+									mainAxisAlignment: MainAxisAlignment.spaceAround,
+									children: _moodMap.entries.map((entry) {
+										final emojiKey = entry.key;
+										// キーから絵文字本体('💪', '😐', '✨')を抽出
+										final emoji = emojiKey.split(' ')[0]; 
+
+										return ActionChip(
+											// avatar: Text(emoji, style: const TextStyle(fontSize: 12)),
+											label: Text(
+												// emojiKey, // キー全体 ('💪 (hard)') をラベルとして表示
+                        '$emoji',
+												style: TextStyle(
+													fontWeight: selectedMoodEmoji == emojiKey
+														? FontWeight.bold
+														: FontWeight.normal,
+													color: selectedMoodEmoji == emojiKey
+														? Theme.of(context).colorScheme.primary
+														: Theme.of(context).textTheme.bodyMedium?.color,
+												),
+											),
+											shape: selectedMoodEmoji == emojiKey
+												? const StadiumBorder(side: BorderSide(width: 2, color: Colors.blueAccent))
+												: const StadiumBorder(),
+											onPressed: () {
+												setState(() {
+													selectedMoodEmoji = emojiKey; // 💡 修正: キー全体をセット
+													initialMoodValue = _moodMap[emojiKey]!; // 選択された値を更新
+												});
+											},
+											backgroundColor: selectedMoodEmoji == emojiKey
+												? Colors.blue.withOpacity(0.1)
+												: null,
+										);
+									}).toList(),
+								),
+								const SizedBox(height: 16),
+								TextField(
+									controller: titleCtrl,
+									autofocus: true,
+									decoration: const InputDecoration(hintText: '例）レポート提出'),
+									onSubmitted: (_) =>
+										nav.pop(_EditData(titleCtrl.text, due, syncCal, initialMoodValue)),
+								),
+								const SizedBox(height: 8),
+								Row(
+									children: [
+										Expanded(
+											child: Text(
+												due == null
+													? '期限: なし'
+													: '期限: ${DateFormat('yyyy/MM/dd HH:mm').format(due!)}',
+											),
+										),
+										TextButton.icon(
+											onPressed: () async {
+												final now = DateTime.now();
+												final date = await showDatePicker(
+													context: context,
+													firstDate: DateTime(now.year - 1),
+													lastDate: DateTime(now.year + 2),
+													initialDate: due ?? now,
+												);
+												if (date == null) return;
+												final time = await showTimePicker(
+													context: context,
+													initialTime: TimeOfDay.fromDateTime(due ?? now),
+												);
+												if (time == null) return;
+												setState(() {
+													due = DateTime(
+														date.year,
+														date.month,
+														date.day,
+														time.hour,
+														time.minute,
+													);
+												});
+											},
+											icon: const Icon(Icons.event),
+											label: const Text('期限設定'),
+										),
+									],
+								),
+								CheckboxListTile(
+									value: syncCal,
+									onChanged: (v) => setState(() => syncCal = v ?? false),
+									title: const Text('Google カレンダーに登録/更新する'),
+									controlAffinity: ListTileControlAffinity.leading,
+								),
+							],
+						),
+						actions: [
+							TextButton(
+								onPressed: () => nav.pop(),
+								child: const Text('キャンセル'),
+							),
+							FilledButton(
+								onPressed: () =>
+									nav.pop(_EditData(titleCtrl.text, due, syncCal, initialMoodValue)),
+								child: const Text('保存'),
+							),
+						],
+					),
+				);
+			},
+		);
+	}
 }
 
 class _EditData {
-  final String title;
-  final DateTime? due;
-  final bool syncCal;
+	final String title;
+	final DateTime? due;
+	final bool syncCal;
+	final int? moodValue; // 絵文字で取得した難易度を持たせる
 
-  _EditData(this.title, this.due, this.syncCal);
+	_EditData(this.title, this.due, this.syncCal, this.moodValue);
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState();
+	const _EmptyState();
 
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.checklist, size: 64),
-            const SizedBox(height: 12),
-            Text('まだタスクがありません', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            const Text('右下の「追加」からタスクを作成しましょう。'),
-          ],
-        ),
-      ),
-    );
-  }
+	@override
+	Widget build(BuildContext context) {
+		return Center(
+			child: Padding(
+				padding: const EdgeInsets.all(24.0),
+				child: Column(
+					mainAxisSize: MainAxisSize.min,
+					children: [
+						const Icon(Icons.checklist, size: 64),
+						const SizedBox(height: 12),
+						Text('まだタスクがありません', style: Theme.of(context).textTheme.titleMedium),
+						const SizedBox(height: 8),
+						const Text('右下の「追加」からタスクを作成しましょう。'),
+					],
+				),
+			),
+		);
+	}
 }

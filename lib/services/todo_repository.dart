@@ -5,6 +5,7 @@ import '../models/todo.dart';
 import 'calendar_service.dart';
 import 'fatigue_service.dart';
 import 'dart:math'; // 日付の前倒しをランダムにするために追加 (issue-5)
+import 'dart:math' show exp;
 
 class TodoRepository {
   TodoRepository(this._calendar);
@@ -88,16 +89,16 @@ class TodoRepository {
     if (syncToCalendar) {
       eventId = await _calendar.createEvent(
         summary: title,
-        start: _anchor0900(displayed),
-        end: _anchor0900(displayed).add(const Duration(hours: 1)),
+        start: await _anchor0900(displayed),
+        end: (await _anchor0900(displayed)).add(const Duration(hours: 1)),
         description: 'source=todo-app',
       );
     }
 
     await _colFor(uid).add({
       'title': title,
-      'displayedDue': Timestamp.fromDate(_anchor0900(displayed)),
-      'realDue': Timestamp.fromDate(_anchor0900(realDue)),
+      'displayedDue': Timestamp.fromDate(await _anchor0900(displayed)),
+      'realDue': Timestamp.fromDate(await _anchor0900(realDue)),
       'calendarEventId': eventId,
       'state': 'active',
       'completedAt': null,
@@ -133,7 +134,7 @@ class TodoRepository {
       updated++;
 
       if (eventId != null && realDue != null) {
-        final start = _anchor0900(realDue);
+        final start = await _anchor0900(realDue);
         await _calendar.updateEventStart(
           eventId: eventId,
           newStart: start,
@@ -169,11 +170,11 @@ class TodoRepository {
     if (!nextDisplayed.isBefore(displayed)) return null; // 変化なし
 
     await _colFor(_uid!).doc(todo.id).update({
-      'displayedDue': Timestamp.fromDate(_anchor0900(nextDisplayed)),
+      'displayedDue': Timestamp.fromDate(await _anchor0900(nextDisplayed)),
       'updatedAt': Timestamp.fromDate(DateTime.now()),
     });
 
-    return _anchor0900(nextDisplayed);
+    return await _anchor0900(nextDisplayed);
   }
 
   // ===== 完了処理 =====
@@ -208,89 +209,176 @@ class TodoRepository {
         _uid!,
       ).doc(todo.id).update({'updatedAt': Timestamp.fromDate(now)});
     }
- }
+  }
 
-Future<void> updateDisplayedDue(String todoId, DateTime newDisplayed) async {
-  final uid = _uid;
-  if (uid == null) return;
+  Future<void> updateDisplayedDue(String todoId, DateTime newDisplayed) async {
+    final uid = _uid;
+    if (uid == null) return;
 
-  await _colFor(uid).doc(todoId).update({
-    'displayedDue': Timestamp.fromDate(newDisplayed),
-    // 端末時間の誤差を避けたい場合はサーバ時刻
-    'updatedAt': FieldValue.serverTimestamp(),
-  });
-}
+    await _colFor(uid).doc(todoId).update({
+      'displayedDue': Timestamp.fromDate(newDisplayed),
+      // 端末時間の誤差を避けたい場合はサーバ時刻
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
 
-Future<List<Todo>> listAll() async {
-  final uid = _uid;
-  if (uid == null) return [];
+  Future<List<Todo>> listAll() async {
+    final uid = _uid;
+    if (uid == null) return [];
 
-  // ⚠ ここでは複合 orderBy を使わない（= インデックス不要）
-  final qs = await _colFor(uid).get();
-
-  final list = qs.docs.map((d) => Todo.fromDoc(d)).toList();
-
-  // ↓ 並びはメモリ上で安定ソート（state → displayedDue/realDue → id）
-  int stateRank(Todo t) {
-    switch (t.state) {
-      case TodoState.active: return 0;
-      case TodoState.switchedToReal: return 1;
-      case TodoState.completed: return 2;
+    // ⚠ ここでは複合 orderBy を使わない（= インデックス不要）
+    final qs = await _colFor(uid).get();
+    final list = qs.docs.map((d) => Todo.fromDoc(d)).toList();
+    // ↓ 並びはメモリ上で安定ソート（state → displayedDue/realDue → id）
+    int stateRank(Todo t) {
+      switch (t.state) {
+        case TodoState.active: return 0;
+        case TodoState.switchedToReal: return 1;
+        case TodoState.completed: return 2;
+      }
     }
+
+    DateTime far = DateTime(9999);
+    list.sort((a, b) {
+      final sa = stateRank(a), sb = stateRank(b);
+      if (sa != sb) return sa - sb;
+      
+      final da = (a.displayedDue ?? a.realDue) ?? far;
+      final db = (b.displayedDue ?? b.realDue) ?? far;
+      final c = da.compareTo(db);
+      if (c != 0) return c;
+
+      return a.id.compareTo(b.id);
+    });
+    return list;
   }
 
-  DateTime far = DateTime(9999);
-  list.sort((a, b) {
-    final sa = stateRank(a), sb = stateRank(b);
-    if (sa != sb) return sa - sb;
-
-    final da = (a.displayedDue ?? a.realDue) ?? far;
-    final db = (b.displayedDue ?? b.realDue) ?? far;
-    final c = da.compareTo(db);
-    if (c != 0) return c;
-
-    return a.id.compareTo(b.id);
-  });
-
-  return list;
+  // 過去の全てのタスクの真の期限を取得
+  Future<List<DateTime>> _fetchAllRealDues() async {
+    final uid = _uid;
+    if (uid == null) return [];
+    
+    // 完了済みだけでなく、Firestore上の全てのタスクを取得する
+    final qs = await _colFor(uid).get();
+      
+    return qs.docs
+      .map((d) => (d.data()['realDue'] as Timestamp?)?.toDate())
+      .whereType<DateTime>()
+      .toList();
   }
 
-//   DateTime _anchor0900(DateTime base) =>
-//       DateTime(base.year, base.month, base.day, 9, 0);
-// }
+  // Softmax
+  Map<int, double> _softmax(Map<int, int> counts) {
+    if (counts.isEmpty) return {};
+    
+    final Map<int, double> exponents = counts.map((key, value) => MapEntry(key, exp(value.toDouble())));
+    final double sumOfExponents = exponents.values.fold(0.0, (prev, element) => prev + element);
+    
+    if (sumOfExponents == 0) {
+      // 全てのカウントが0の場合、均等な確率を割り当てる
+      final double uniformProb = 1.0 / counts.length;
+      return counts.map((key, value) => MapEntry(key, uniformProb));
+    }
+    
+    // 確率を計算
+    return exponents.map((key, value) => MapEntry(key, value / sumOfExponents));
+  }
+
+  // 確率分布に基づいてサンプリング
+  int _sampleFromProbabilities(Map<int, double> probabilities) {
+    if (probabilities.isEmpty) return 0;
+    
+    final double rand = _random.nextDouble();
+    double cumulativeProbability = 0.0;
+    
+    // キーをソート
+    final sortedEntries = probabilities.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+
+    for (final entry in sortedEntries) {
+      cumulativeProbability += entry.value;
+      if (rand < cumulativeProbability) {
+        return entry.key; // サンプリングされた値（時間または分）
+      }
+    }
+    
+    return sortedEntries.last.key; // フォールバック
+  }
+
+
   // DateTime _anchor0900(DateTime base){ // 0900とは言っているが、時間をランダムに変更したもの(issue-5)
-  //   final int randomIndex = _random.nextInt(anchorHours.length);
-  //   final int randomHour = anchorHours[randomIndex];
-  //   return DateTime(base.year, base.month, base.day, randomHour, 0);
-  // }
-DateTime _anchor0900(DateTime base){ // 0900とは言っているが、時間をランダムに変更したもの(issue-5)
-		final now = DateTime.now();
+	// 	final now = DateTime.now();
 		
-		if (base.year == now.year && base.month == now.month && base.day == now.day) {
+	// 	if (base.year == now.year && base.month == now.month && base.day == now.day) {
 
-			final List<int> validHours = [];
-			for (final hour in anchorHours) {
-				final candidateTime = DateTime(base.year, base.month, base.day, hour, 0);
+	// 		final List<int> validHours = [];
+	// 		for (final hour in anchorHours) {
+	// 			final candidateTime = DateTime(base.year, base.month, base.day, hour, 0);
 				
-				// 厳密に現在時刻より後であるかを確認 (12:16 > 12:00 を回避)
-				if (candidateTime.isAfter(now)) {
-					validHours.add(hour);
-				}
-			}
+	// 			// 厳密に現在時刻より後であるかを確認 (12:16 > 12:00 を回避)
+	// 			if (candidateTime.isAfter(now)) {
+	// 				validHours.add(hour);
+	// 			}
+	// 		}
 
-			if (validHours.isNotEmpty) {
-				// 使える時間がある場合: ランダム
-				final randomIndex = _random.nextInt(validHours.length);
-				final randomHour = validHours[randomIndex];
-				return DateTime(base.year, base.month, base.day, randomHour, 0);
-			} else {
-				// 使える時間がない場合（今日のアンカー時刻をすべて過ぎた）今日の23時59分を返す
-				return DateTime(base.year, base.month, base.day, 23, 59);
-			}
-		} 
+	// 		if (validHours.isNotEmpty) {
+	// 			// 使える時間がある場合: ランダム
+	// 			final randomIndex = _random.nextInt(validHours.length);
+	// 			final randomHour = validHours[randomIndex];
+	// 			return DateTime(base.year, base.month, base.day, randomHour, 0);
+	// 		} else {
+	// 			// 使える時間がない場合（今日のアンカー時刻をすべて過ぎた）今日の23時59分を返す
+	// 			return DateTime(base.year, base.month, base.day, 23, 59);
+	// 		}
+	// 	} 
 		
-		final int randomIndex = _random.nextInt(anchorHours.length);
-		final int randomHour = anchorHours[randomIndex];
-		return DateTime(base.year, base.month, base.day, randomHour, 0);
-	}
+	// 	final int randomIndex = _random.nextInt(anchorHours.length);
+	// 	final int randomHour = anchorHours[randomIndex];
+	// 	return DateTime(base.year, base.month, base.day, randomHour, 0);
+	// }
+  Future<DateTime> _anchor0900(DateTime base) async { 
+    final now = DateTime.now();
+    final realDues = await _fetchAllRealDues();
+
+    final hourCounts = <int, int>{};
+    for (int i = 0; i < 24; i++) hourCounts[i] = 0; // 0時から23時まで初期化
+
+    for (final due in realDues) {
+      hourCounts[due.hour] = (hourCounts[due.hour] ?? 0) + 1;
+    }
+
+    final hourProbabilities = _softmax(hourCounts);
+    
+    if (base.year == now.year && base.month == now.month && base.day == now.day) {
+      
+      final availableHourProbabilities = Map<int, double>.fromEntries(
+        hourProbabilities.entries.where((entry) => 
+          DateTime(base.year, base.month, base.day, entry.key, 0).isAfter(now)
+        )
+      );
+      
+      if (availableHourProbabilities.isNotEmpty) {
+
+        final sumAvailableProb = availableHourProbabilities.values.fold(0.0, (p, e) => p + e);
+        final renormalizedAvailableProb = sumAvailableProb > 0
+          ? availableHourProbabilities.map((k, v) => MapEntry(k, v / sumAvailableProb))
+          : availableHourProbabilities;
+        
+        final sampledHour = _sampleFromProbabilities(renormalizedAvailableProb);
+        
+        final sampledMinute = 0;
+
+        return DateTime(base.year, base.month, base.day, sampledHour, sampledMinute);
+      } else {
+        // 使える時間がない場合: 今日の23時59分を返す
+        return DateTime(base.year, base.month, base.day, 23, 59);
+      }
+    }
+    
+    // 4. baseの日付が未来（明日以降）の場合: 全ての時刻からサンプリング
+    final sampledHour = _sampleFromProbabilities(hourProbabilities);
+    // 分はランダム (現在は分の履歴を考慮せずに固定)
+    final sampledMinute = 0; 
+
+    return DateTime(base.year, base.month, base.day, sampledHour, sampledMinute);
+  }
 }

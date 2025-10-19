@@ -208,6 +208,51 @@ class TodoRepository {
         _uid!,
       ).doc(todo.id).update({'updatedAt': Timestamp.fromDate(now)});
     }
+ }
+
+Future<void> updateDisplayedDue(String todoId, DateTime newDisplayed) async {
+  final uid = _uid;
+  if (uid == null) return;
+
+  await _colFor(uid).doc(todoId).update({
+    'displayedDue': Timestamp.fromDate(newDisplayed),
+    // 端末時間の誤差を避けたい場合はサーバ時刻
+    'updatedAt': FieldValue.serverTimestamp(),
+  });
+}
+
+Future<List<Todo>> listAll() async {
+  final uid = _uid;
+  if (uid == null) return [];
+
+  // ⚠ ここでは複合 orderBy を使わない（= インデックス不要）
+  final qs = await _colFor(uid).get();
+
+  final list = qs.docs.map((d) => Todo.fromDoc(d)).toList();
+
+  // ↓ 並びはメモリ上で安定ソート（state → displayedDue/realDue → id）
+  int stateRank(Todo t) {
+    switch (t.state) {
+      case TodoState.active: return 0;
+      case TodoState.switchedToReal: return 1;
+      case TodoState.completed: return 2;
+    }
+  }
+
+  DateTime far = DateTime(9999);
+  list.sort((a, b) {
+    final sa = stateRank(a), sb = stateRank(b);
+    if (sa != sb) return sa - sb;
+
+    final da = (a.displayedDue ?? a.realDue) ?? far;
+    final db = (b.displayedDue ?? b.realDue) ?? far;
+    final c = da.compareTo(db);
+    if (c != 0) return c;
+
+    return a.id.compareTo(b.id);
+  });
+
+  return list;
   }
 
 //   DateTime _anchor0900(DateTime base) =>
